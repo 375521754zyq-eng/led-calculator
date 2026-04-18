@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, minimum-scale=0.5, user-scalable=yes">
+    <title>菲利视界 - LED显示屏报价计算器</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/docx@7.8.2/build/index.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js" defer></script>
+    <link rel="stylesheet" href="./styles/base.css">
+    <link rel="stylesheet" href="./styles/theme.css">
+    <link rel="stylesheet" href="./styles/layout.css">
+    <link rel="stylesheet" href="./styles/responsive.css">
+    <link rel="stylesheet" href="./styles/shell-card-ui.css">
+</head>
+<body>
+    <!-- 密码验证层 -->
+    <div id="passwordOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%); z-index: 99999; display: flex; align-items: center; justify-content: center;">
+        <div style="background: white; padding: 40px; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); text-align: center; min-width: 320px;">
+            <h2 style="color: #1e3a5f; margin-bottom: 10px;">🔒 菲利视界 LED报价系统</h2>
+            <p style="color: #666; margin-bottom: 30px; font-size: 14px;">请输入访问密码</p>
+            <input type="password" id="accessPassword" placeholder="请输入密码" style="width: 100%; padding: 14px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; text-align: center; margin-bottom: 20px; box-sizing: border-box;">
+            <button onclick="verifyPassword()" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold;">进入系统</button>
+            <p id="passwordError" style="color: #e74c3c; margin-top: 15px; font-size: 13px; display: none;">密码错误，请重试</p>
+            <p style="color: #999; margin-top: 20px; font-size: 12px;">© 菲利视界 - 内部专用</p>
+        </div>
+    </div>
+
+    <script>
+        // 设置密码（你可以修改这里）
+        const SYSTEM_PASSWORD = 'filivision2024';
+        
+        function verifyPassword() {
+            const input = document.getElementById('accessPassword').value;
+            if (input === SYSTEM_PASSWORD) {
+                document.getElementById('passwordOverlay').style.display = 'none';
+                // 显示主应用
+                document.getElementById('mainApp').style.display = 'block';
+                // 可选：记住密码（本次会话有效）
+                sessionStorage.setItem('authenticated', 'true');
+            } else {
+                document.getElementById('passwordError').style.display = 'block';
+                document.getElementById('accessPassword').value = '';
+                document.getElementById('accessPassword').focus();
+            }
+        }
+        
+        // 回车键提交
+        document.addEventListener('DOMContentLoaded', function() {
+            const passwordInput = document.getElementById('accessPassword');
+            if (passwordInput) {
+                passwordInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') verifyPassword();
+                });
+                passwordInput.focus();
+            }
+            
+            // 如果已验证过，直接跳过
+            if (sessionStorage.getItem('authenticated') === 'true') {
+                document.getElementById('passwordOverlay').style.display = 'none';
+                document.getElementById('mainApp').style.display = 'block';
+            }
+        });
+    </script>
+
+    <div class="shell-app" style="display: none;" id="mainApp">
+        <div class="shell-top-bar">
+            <div class="shell-header-title">LED 项目报价配置工作台</div>
+            <div class="shell-project-meta">
+                <div class="shell-input-group">
+                    <div class="shell-input-box">
+                        <label for="shellCustomerName">客户名称</label>
+                        <input type="text" id="shellCustomerName" placeholder="输入客户名称">
+                    </div>
+                    <div class="shell-input-box">
+                        <label for="shellProjectName">项目名称</label>
+                        <input type="text" id="shellProjectName" placeholder="输入项目名称">
+                    </div>
+                    <div class="shell-input-box">
+                        <label for="shellProjectLocation">项目地点</label>
+                        <input type="text" id="shellProjectLocation" placeholder="输入项目地点">
+                    </div>
+                    <div class="shell-input-box is-compact">
+                        <label for="shellTargetWidth">宽(m)</label>
+                        <input type="number" id="shellTargetWidth" min="0.01" step="0.01" inputmode="decimal">
+                    </div>
+                    <div class="shell-input-box is-compact">
+                        <label for="shellTargetHeight">高(m)</label>
+                        <input type="number" id="shellTargetHeight" min="0.01" step="0.01" inputmode="decimal">
+                    </div>
+                </div>
+                <div class="shell-action-group">
+                    <button class="shell-btn" type="button" onclick="saveCurrentProject()">💾 保存项目</button>
+                    <button class="shell-btn" type="button" onclick="showProjectHistory()">📋 历史记录</button>
+                    <button class="shell-btn" type="button" onclick="exportCurrentProject()">📤 导出 JSON</button>
+                    <button class="shell-btn" type="button" onclick="importProjectFromFile()">📥 导入 JSON</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="shell-main">
+            <aside class="shell-sidebar" id="shellSidebar"></aside>
+
+            <section class="shell-content">
+                <div class="shell-content-header">
+                    <div class="shell-content-title-row">
+                        <div class="shell-content-title" id="shellContentTitle">模组选择</div>
+                        <div class="shell-selection-hint" id="shellSelectionHint">互斥单选</div>
+                    </div>
+                    <div class="shell-status" id="shellStatusMessage"></div>
+                </div>
+
+                <div class="shell-sub-nav is-hidden" id="shellSubNav"></div>
+                <div class="shell-card-grid" id="shellCardGrid">
+                    <div class="shell-placeholder">正在加载原系统配置，请稍候...</div>
+                </div>
+
+                <div class="shell-results">
+                    <div class="shell-kpis">
+                        <div class="shell-kpi">
+                            <div class="shell-kpi-label">当前型号</div>
+                            <div class="shell-kpi-value" id="shellKpiModel">等待计算</div>
+                        </div>
+                        <div class="shell-kpi">
+                            <div class="shell-kpi-label">拼接排布</div>
+                            <div class="shell-kpi-value" id="shellKpiLayout">等待计算</div>
+                        </div>
+                        <div class="shell-kpi">
+                            <div class="shell-kpi-label">净显示尺寸</div>
+                            <div class="shell-kpi-value" id="shellKpiSize">等待计算</div>
+                        </div>
+                        <div class="shell-kpi">
+                            <div class="shell-kpi-label">预估总价</div>
+                            <div class="shell-kpi-value is-price" id="shellKpiPrice">¥ 0</div>
+                        </div>
+                    </div>
+
+                    <div class="shell-result-tabs">
+                        <button class="shell-result-tab is-active" type="button" data-shell-result="overview">项目总览</button>
+                        <button class="shell-result-tab" type="button" data-shell-result="draft">算量推演</button>
+                        <button class="shell-result-tab" type="button" data-shell-result="quote">报价明细</button>
+                        <button class="shell-result-tab" type="button" data-shell-result="shipping">发货备料</button>
+                        <button class="shell-result-tab" type="button" data-shell-result="layout">排布示意</button>
+                    </div>
+
+                    <div class="shell-result-view">
+                        <div class="shell-result-panel is-active" id="shellResultOverview"></div>
+                        <div class="shell-result-panel" id="shellResultDraft"></div>
+                        <div class="shell-result-panel" id="shellResultQuote"></div>
+                        <div class="shell-result-panel" id="shellResultShipping"></div>
+                        <div class="shell-result-panel" id="shellResultLayout"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div class="shell-bottom-bar">
+            <div class="shell-selected-summary" id="shellSelectedTags"></div>
+            <div class="shell-export-actions">
+                <div class="shell-total-price">
+                    <span>预估总价（含已选项）</span>
+                    <strong id="shellTotalPrice">¥ 0</strong>
+                </div>
+                <button class="shell-btn is-primary" type="button" onclick="showExportLanguageDialog('quotation')">📄 导出报价 (Word)</button>
+                <button class="shell-btn" type="button" onclick="exportQuotationToExcel()">📊 导出报价 (Excel)</button>
+                <button class="shell-btn" type="button" onclick="showExportLanguageDialog('contract')">📝 导出合同</button>
+                <button class="shell-btn is-success" type="button" onclick="showExportLanguageDialog('shipping')">📦 导出备料 (Word)</button>
+                <button class="shell-btn" type="button" onclick="exportShippingToExcel()">📋 导出备料 (Excel)</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="legacyAppBridge" class="shell-legacy-bridge" aria-hidden="true">
+    <div class="container" id="mainContainer">
+        <div class="header">
+            <div class="hero-copy">
+                <span class="hero-eyebrow">FILI VISION / QUOTE STUDIO</span>
+                <h1>LED 显示屏方案配置器</h1>
+                <p>更像一套产品工作台，而不只是计算表。输入项目约束后，实时得到尺寸、报价、发货清单与布线排布结果。</p>
+                <div class="hero-tags">
+                    <span class="hero-tag">实时预览</span>
+                    <span class="hero-tag">报价结构</span>
+                    <span class="hero-tag">发货清单</span>
+                </div>
+            </div>
+            <div class="hero-showcase">
+                <div class="showcase-frame">
+                    <div class="showcase-screen" id="previewScreen">
+                        <div class="showcase-grid"></div>
+                        <div class="showcase-label">
+                            <div>
+                                <span>当前品类</span>
+                                <strong id="previewCategoryLabel">室内常规模组</strong>
+                            </div>
+                            <div>
+                                <span>当前型号</span>
+                                <strong id="previewModelLabel">P1.25</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="hero-stat-grid">
+                    <div class="hero-stat">
+                        <span>目标尺寸</span>
+                        <strong id="previewSizeLabel">3.00m × 2.00m</strong>
+                    </div>
+                    <div class="hero-stat">
+                        <span>目标面积</span>
+                        <strong id="previewAreaLabel">6.00㎡</strong>
+                    </div>
+                    <div class="hero-stat">
+                        <span>模组规格</span>
+                        <strong id="previewModuleLabel">320 × 160mm</strong>
+                    </div>
+                    <div class="hero-stat">
+                        <span>工作状态</span>
+                        <strong id="previewModeLabel">实时配置中</strong>
+                    </div>
+                </div>
+                <div class="hero-actions">
+                    <button class="ghost-btn" type="button" data-jump-target="quote">查看报价</button>
+                    <button class="ghost-btn" type="button" data-jump-target="layout">查看排布</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <!-- 输入区域 -->
+            <div class="input-section">
+                <div class="panel-heading">
+                    <div>
+                        <span class="section-kicker">配置工作台</span>
+                        <h2 class="section-title">项目参数</h2>
+                        <p>先定义客户、尺寸与物料策略，再生成完整的报价与发货方案。</p>
+                    </div>
+                    <span class="panel-badge">自动计算已开启</span>
+                </div>
+                
+                <div class="form-row form-row-triple">
+                    <div class="form-group">
+                        <label>客户名称</label>
+                        <input type="text" id="customerName" placeholder="客户名称">
+                    </div>
+                    <div class="form-group">
+                        <label>项目名称</label>
+                        <input type="text" id="projectName" placeholder="项目名称">
+                    </div>
+                    <div class="form-group">
+                        <label>项目地点</label>
+                        <input type="text" id="projectLocation" placeholder="项目地点">
+                    </div>
+                    
+                    <!-- 项目管理按钮 -->
+                    <div class="form-group" style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                        <label style="color: #1976d2; font-weight: bold;">📁 项目管理</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                            <button type="button" onclick="saveCurrentProject()" style="padding: 10px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
+                                💾 保存项目
+                            </button>
+                            <button type="button" onclick="showProjectHistory()" style="padding: 10px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
+                                📋 历史记录
+                            </button>
+                            <button type="button" onclick="exportCurrentProject()" style="padding: 10px; background: #FF9800; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
+                                📤 导出JSON
+                            </button>
+                            <button type="button" onclick="importProjectFromFile()" style="padding: 10px; background: #9C27B0; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
+                                📥 导入JSON
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>产品大类</label>
+                    <select id="productCategory" onchange="updateProductOptions()">
+                        <option value="indoor_standard">室内常规模组</option>
+                        <option value="indoor_soft">室内软模组</option>
+                        <option value="indoor_rental">室内租赁屏及格栅屏</option>
+                        <option value="outdoor_standard">户外常规模组</option>
+                        <option value="outdoor_soft">户外软模组</option>
+                        <option value="outdoor_rental">户外租赁屏及格栅屏</option>
+                        <option value="crystal">晶膜屏</option>
+                        <option value="holographic">全息屏</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>目标宽度 (米)</label>
+                        <input type="number" id="targetWidth" step="0.01" min="0.01" inputmode="decimal" value="3.0" placeholder="例如：3.0">
+                    </div>
+                    <div class="form-group">
+                        <label>目标高度 (米)</label>
+                        <input type="number" id="targetHeight" step="0.01" min="0.01" inputmode="decimal" value="2.0" placeholder="例如：2.0">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>产品型号</label>
+                    <select id="productModel" onchange="updateModuleSpecs()">
+                        <optgroup label="室内常规" id="indoor_standard_group">
+                            <option value="1.25">P1.25 (320×160mm) - ¥5900/㎡</option>
+                            <option value="1.538">P1.538 (320×160mm) - ¥3680/㎡</option>
+                            <option value="1.86">P1.86 (320×160mm) - ¥2380/㎡</option>
+                            <option value="2.0">P2.0 (320×160mm) - ¥2180/㎡</option>
+                            <option value="2.5">P2.5 高刷 (320×160mm) - ¥1380/㎡</option>
+                            <option value="3.0_low">P3.0 普刷 (192×192mm) - ¥1180/㎡</option>
+                            <option value="3.0">P3.0 高刷 (320×160mm) - ¥1280/㎡</option>
+                            <option value="4.0">P4.0 (256×256mm) - ¥880/㎡</option>
+                            <option value="4.0_alt1">P4.0 (128×256mm) - ¥1080/㎡</option>
+                            <option value="4.0_alt2">P4.0 (320×160mm) - ¥1080/㎡</option>
+                        </optgroup>
+                        <optgroup label="室内软模组" id="indoor_soft_group" style="display:none;">
+                            <option value="1.25_soft">P1.25 软模组 (320×160mm) - ¥8280/㎡</option>
+                            <option value="1.538_soft">P1.538 软模组 (320×160mm) - ¥5080/㎡</option>
+                            <option value="1.86_soft">P1.86 软模组 (320×160mm) - ¥3180/㎡</option>
+                            <option value="2.0_soft">P2.0 软模组 (320×160mm) - ¥2900/㎡</option>
+                            <option value="2.5_soft">P2.5 软模组 (320×160mm) - ¥1980/㎡</option>
+                            <option value="3.0_soft">P3.0 软模组 (320×160mm) - ¥1780/㎡</option>
+                            <option value="4.0_soft">P4.0 软模组 (320×160mm) - ¥1480/㎡</option>
+                        </optgroup>
+                        <optgroup label="室内租赁屏" id="indoor_rental_group" style="display:none;">
+                            <option value="3.91_rental">P3.91 租赁屏 (7680Hz) - ¥2580/㎡</option>
+                            <option value="2.976_rental">P2.976 高刷租赁 - ¥3080/㎡</option>
+                            <option value="2.604_rental">P2.604 高刷租赁 - ¥3380/㎡</option>
+                            <option value="3.91_tile">P3.91 地砖屏 - ¥2950/㎡</option>
+                            <option value="3.91_grid_500">P3.91 格栅屏 500CD - ¥1380/㎡</option>
+                            <option value="3.91_grid_2000">P3.91 格栅屏 2000CD - ¥2200/㎡</option>
+                            <option value="3.91_grid_4500">P3.91 格栅屏 4500CD - ¥3100/㎡</option>
+                        </optgroup>
+                        <optgroup label="户外常规" id="outdoor_standard_group" style="display:none;">
+                            <option value="2.5o_normal">户外 P2.5 普刷 - ¥3380/㎡</option>
+                            <option value="2.5o_high">户外 P2.5 高刷 - ¥3480/㎡</option>
+                            <option value="3.076o_normal">户外 P3.076 普刷 - ¥2580/㎡</option>
+                            <option value="3.076o_high">户外 P3.076 高刷 - ¥2680/㎡</option>
+                            <option value="4o_normal">户外 P4.0 普刷 - ¥1680/㎡</option>
+                            <option value="4o_high">户外 P4.0 高刷 - ¥1780/㎡</option>
+                            <option value="5.0o_normal">户外 P5.0 普刷 - ¥1380/㎡</option>
+                            <option value="5.0o_high">户外 P5.0 高刷 - ¥1580/㎡</option>
+                            <option value="6.0o_normal">户外 P6.0 普刷 (2525 灯珠) - ¥1280/㎡</option>
+                            <option value="6.0o_high">户外 P6.0 高刷 - ¥1880/㎡</option>
+                            <option value="8.0o_normal">户外 P8.0 普刷 - ¥1480/㎡</option>
+                            <option value="8.0o_high">户外 P8.0 高刷 - ¥1580/㎡</option>
+                            <option value="10.0o_normal">户外 P10.0 普刷 - ¥1180/㎡</option>
+                            <option value="10.0o_high">户外 P10.0 高刷 - ¥1280/㎡</option>
+                        </optgroup>
+                        <optgroup label="户外软模组" id="outdoor_soft_group" style="display:none;">
+                            <option value="2.5o_soft">户外 P2.5 软模组 - ¥5880/㎡</option>
+                            <option value="3.076o_soft">户外 P3.076 软模组 - 价格未知</option>
+                            <option value="4o_soft">户外 P4.0 软模组 - ¥3050/㎡</option>
+                        </optgroup>
+                        <optgroup label="户外租赁屏" id="outdoor_rental_group" style="display:none;">
+                            <option value="3.91o_rental">户外 P3.91 租赁 (7680Hz) - ¥2880/㎡</option>
+                            <option value="2.976o_rental">户外 P2.976 高刷租赁 - ¥4080/㎡</option>
+                            <option value="2.604o_rental">户外 P2.604 高刷租赁 - ¥5480/㎡</option>
+                            <option value="3.91o_grid_4500">户外 P3.91 格栅屏 4500CD - ¥4700/㎡</option>
+                        </optgroup>
+                        <optgroup label="晶膜屏" id="crystal_group" style="display:none;">
+                            <option value="P20_crystal">P20 晶膜屏 (1000×400mm) - ¥6000/㎡</option>
+                            <option value="P15_crystal">P15 晶膜屏 (990×390mm) - ¥7000/㎡</option>
+                            <option value="P10_crystal">P10 晶膜屏 (1000×400mm) - ¥8800/㎡</option>
+                            <option value="P8_crystal">P8 晶膜屏 (1000×400mm) - ¥10800/㎡</option>
+                            <option value="P6.25_crystal">P6.25 晶膜屏 (1000×400mm) - ¥11250/㎡</option>
+                            <option value="P5_crystal">P5 晶膜屏 (1000×320mm) - ¥17800/㎡</option>
+                            <option value="P4_crystal">P4 晶膜屏 (1000×240mm) - ¥22000/㎡</option>
+                        </optgroup>
+                        <optgroup label="全息屏" id="holographic_group" style="display:none;">
+                            <option value="P3.91_holo_16s">P3.91 16 扫 5000cd - ¥11180/㎡ (含税含配件)</option>
+                            <option value="P3.91_holo_32s_1600">P3.91 32 扫 1600cd - ¥7800/㎡</option>
+                            <option value="P3.91_holo_32s_2000">P3.91 32 扫 2000cd - ¥8840/㎡</option>
+                            <option value="P4.81_holo">P4.81 13 扫 4000cd - ¥9360/㎡</option>
+                            <option value="P3.9-7.8_holo">P3.9-7.8 8 扫 5000cd - ¥8450/㎡</option>
+                            <option value="P6.25_holo_2000">P6.25 10 扫 2000cd - ¥6240/㎡</option>
+                            <option value="P6.25_holo_2500">P6.25 10 扫 2500cd - ¥6760/㎡</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>其它配件辅料（直接点击选择，支持多选）</label>
+                    <div id="accessoryCheckboxes" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 10px;">
+                        <div style="margin-bottom: 10px; padding: 8px; background: #e3f2fd; border-radius: 4px; font-size: 13px;">
+                            <strong>💡 使用说明：</strong>直接点击勾选，无需按键 | 结构费必选 1 项
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #d32f2f;">⭐ 结构费（必选 1 项）</strong>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="E_structure" class="structure-only"> E 结构（自动按面积计费）</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="Z_structure" class="structure-only"> 甄结构（自动按面积计费）</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="outdoor_rear_structure" class="structure-only"> 户外后维护钢结构 - ¥500/㎡</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="outdoor_front_structure" class="structure-only"> 户外前维护钢结构 - ¥300/㎡</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #1976d2;">📦 箱体（可选）</strong>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="simple_box"> 简易箱体加组装 - ¥350/㎡</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="waterproof_box"> 防水箱体加组装 - ¥550/㎡</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="column_15"> 双立柱箱体 15㎡以下 - ¥950/㎡</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="cabinet_auto"> 压铸铝箱体（系统自动匹配规格）</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #388e3c;">🔧 模组配件（可选）</strong>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="indoor_bevel"> 室内模组换斜边套件 - ¥10/张</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="outdoor_bevel"> 户外模组加斜边套件 - ¥20/张</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #7b1fa2;">✨ 工艺（可选）</strong>
+                            <div style="margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="gob_coating"> GOB 镀膜工艺 - ¥600/㎡</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #f57c00;">👷 安装调试（可选）</strong>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="install_indoor_auto"> 室内安装调试（自动按面积计费）</label>
+                                <label style="display: none;"><input type="checkbox" name="accessory" value="install_outdoor_high"> 户外安装高空 - ¥500/㎡</label>
+                                <label style="display: none;"><input type="checkbox" name="accessory" value="install_outdoor_normal"> 户外安装非高空 - ¥300/㎡</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #0097a7;">🔌 线材辅料（可选）</strong>
+                            <div style="margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="cable_materials"> 线材辅料 (磁铁，电源线，网线，排线，电缆线) - ¥100/㎡</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #5d4037;">🌐 网络设备（可选）</strong>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="fiber_transceiver"> 中航光纤收发器/台 - ¥780</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="splitter"> 中航分屏器/台 - ¥950</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #c2185b;">🔊 音响设备（可选）</strong>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="audio_30_50"> 会议室音响 30-50 平方 - ¥2,850</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="audio_50_100"> 会议室音响 50-100 平方 - ¥3,850</label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <strong style="color: #4a148c;">🎛️ 其他设备（可选）</strong>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="vj_box"> VJ 声光电联动盒 - ¥2,800</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="vacuum_wired"> 前维护真空吸盘插电款 - ¥550</label>
+                                <label style="display: flex; align-items: center; padding: 6px; background: #f5f5f5; border-radius: 4px;"><input type="checkbox" name="accessory" value="vacuum_wireless"> 前维护真空吸盘充电款 - ¥780</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>接收卡品牌</label>
+                    <select id="receivingCardBrand">
+                        <option value="zhonghang">中航（推荐）</option>
+                        <option value="nova">诺瓦/摩西尔</option>
+                        <option value="kaisida">凯视达</option>
+                        <option value="colorlight">卡莱特</option>
+                        <option value="huidu">灰度</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>电源品牌</label>
+                    <select id="powerBrand">
+                        <option value="5V40A_kangsheng">康盛 5V40A (200W) - ¥38</option>
+                        <option value="5V60A_kangsheng">康盛 5V60A (300W) - ¥75</option>
+                        <option value="5V40A_chuanglian">创联 5V40A - ¥42</option>
+                        <option value="5V60A_chuanglian">创联 5V60A - ¥78</option>
+                        <option value="5V40A_juneng">聚能伟业 5V40A - ¥45</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>模组宽度 (mm)</label>
+                        <input type="number" id="moduleWidth" value="320" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>模组高度 (mm)</label>
+                        <input type="number" id="moduleHeight" value="160" readonly>
+                    </div>
+                </div>
+
+                <button class="btn" type="button" onclick="calculate()">生成方案与报价</button>
+                <div id="statusMessage" class="status-message" aria-live="polite"></div>
+
+                <div class="note">
+                    <strong>计算规则</strong>
+                    <ul style="margin-top: 8px; padding-left: 20px;">
+                        <li>所有计算采用向上取整（CEILING），确保显示面积覆盖预期</li>
+                        <li>电源配置含 5% 备品</li>
+                        <li>视频处理器品牌与接收卡品牌保持一致</li>
+                        <li>网线数量 = 接收卡数量 - 1（S 型级联）</li>
+                        <li>晶膜屏/全息屏仅能定制长度，最长 1500mm</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 结果区域 -->
+            <div class="result-section" id="resultsWorkspace">
+                <div class="results-toolbar">
+                    <div class="toolbar-copy">
+                        <span class="section-kicker">结果中心</span>
+                        <h2 class="section-title">项目输出结果</h2>
+                        <p>在总览、算量推演、报价与发货结果之间快速切换，像浏览一份做过设计的产品方案。</p>
+                    </div>
+                    <div class="results-kpis">
+                        <div class="kpi-card">
+                            <span>当前型号</span>
+                            <strong id="headlineMetricModel">等待选择</strong>
+                        </div>
+                        <div class="kpi-card">
+                            <span>拼接排布</span>
+                            <strong id="headlineMetricLayout">等待计算</strong>
+                        </div>
+                        <div class="kpi-card">
+                            <span>净显示尺寸</span>
+                            <strong id="headlineMetricSize">等待计算</strong>
+                        </div>
+                        <div class="kpi-card">
+                            <span>预估总价</span>
+                            <strong id="headlineMetricPrice">¥ 0</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="result-tabs" id="resultTabs">
+                    <button class="tab-btn is-active" type="button" data-target="overview">总览</button>
+                    <button class="tab-btn" type="button" data-target="draft">算量推演</button>
+                    <button class="tab-btn" type="button" data-target="quote">报价明细</button>
+                    <button class="tab-btn" type="button" data-target="shipping">发货备料</button>
+                    <button class="tab-btn" type="button" data-target="layout">排布图</button>
+                </div>
+
+                <!-- 基础物理参数 -->
+                <div class="result-card result-panel is-active-panel" id="overviewPanel" data-panel="overview">
+                    <h3>项目基础参数</h3>
+                    <div id="basicParams">
+                        <div class="result-item">
+                            <span class="result-label">项目类型</span>
+                            <span class="result-value" id="projectTypeResult">-</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">模组规格</span>
+                            <span class="result-value" id="moduleSpecResult">-</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">物理拼接排布</span>
+                            <span class="result-value" id="layoutResult">-</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">净显示尺寸</span>
+                            <span class="result-value" id="netSizeResult">-</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">含边框总尺寸</span>
+                            <span class="result-value" id="totalSizeResult">-</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">屏幕总像素点</span>
+                            <span class="result-value" id="pixelCountResult">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 车间算量推演草稿 -->
+                <div class="result-card result-panel panel-hidden" id="workshopDraft" data-panel="draft">
+                    <h3>车间算量推演</h3>
+                    <p style="color: #999; text-align: center;">请先输入数据并点击计算</p>
+                </div>
+
+                <!-- 商业报价明细表 -->
+                <div class="result-card result-panel panel-hidden" id="quotationTable" data-panel="quote">
+                    <div class="table-header">
+                        <h3>商业报价明细</h3>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="export-btn" type="button" onclick="showExportLanguageDialog('quotation')">导出 Word</button>
+                            <button class="export-btn" type="button" onclick="exportQuotationToExcel()">导出 Excel</button>
+                        </div>
+                    </div>
+                    <p style="color: #999; text-align: center;">请先输入数据并点击计算</p>
+                </div>
+
+                <!-- 发货备料表 -->
+                <div class="result-card result-panel panel-hidden" id="shippingTable" data-panel="shipping">
+                    <div class="table-header">
+                        <h3>发货备料表</h3>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="export-btn" type="button" onclick="showExportLanguageDialog('shipping')">导出 Word</button>
+                            <button class="export-btn" type="button" onclick="exportShippingToExcel()">导出 Excel</button>
+                        </div>
+                    </div>
+                    <p style="color: #999; text-align: center;">请先输入数据并点击计算</p>
+                </div>
+
+                <!-- 物料清单 -->
+                <div class="result-card result-panel panel-hidden" id="materialCard" data-panel="materials" style="display: none;">
+                    <h3>物料配置清单</h3>
+                    <table id="materialTable">
+                        <thead>
+                            <tr>
+                                <th>物料名称</th>
+                                <th>规格</th>
+                                <th>数量</th>
+                            </tr>
+                        </thead>
+                        <tbody id="materialTableBody">
+                            <tr>
+                                <td colspan="3" style="text-align: center; color: #999;">请先输入数据并点击计算</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 可视化排布图 -->
+                <div class="canvas-container result-panel panel-hidden" id="canvasContainer" data-panel="layout" style="display: none;">
+                    <h3 style="margin-bottom: 15px; color: #333;">系统排布示意图</h3>
+                    <canvas id="layoutCanvas"></canvas>
+                    
+                    <!-- 图例 -->
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color module"></div>
+                            <span>LED 模组</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color power"></div>
+                            <span>电源</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color card"></div>
+                            <span>接收卡</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-line ethernet"></div>
+                            <span>网线（级联）</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-line power"></div>
+                            <span>电源线</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 总报价 -->
+                <div class="total-price">
+                    <div class="label">预估总造价（未税）</div>
+                    <div class="amount" id="totalPrice">¥ 0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <script src="./scripts/core/project-manager.js"></script>
+    <script src="./scripts/core/translations.js"></script>
+    <script src="./scripts/core/export-translator.js"></script>
+    <script src="./scripts/core/export-dialog.js"></script>
+    <script src="./scripts/core/project-state.js"></script>
+    <script src="./scripts/data/catalogs.js"></script>
+    <script src="./scripts/data/contract-template-base64.js"></script>
+    <script src="./scripts/features/exporters.js"></script>
+    <script src="./scripts/features/contract-exporter.js"></script>
+    <script src="./scripts/features/cable-algorithms.js"></script>
+    <script src="./scripts/features/calculator.js"></script>
+    <script src="./scripts/ui/status-controller.js"></script>
+    <script src="./scripts/ui/workbench-ui.js"></script>
+    <script src="./scripts/ui/shell-card-adapter.js"></script>
+</body>
+</html>
